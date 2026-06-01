@@ -10,44 +10,72 @@ import {
   ResponsiveContainer
 } from "recharts";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "";
+
+const resolveUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("http")) {
+    try {
+      const path = new URL(url).pathname;
+      return `${API_BASE}${path}?t=${new Date().getTime()}`;
+    } catch (e) {
+      return url;
+    }
+  }
+  return url;
+};
+
 function UploadPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [structure, setStructure] = useState("building");
+  const [noCrackWarning, setNoCrackWarning] = useState("");
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const savedHistory = JSON.parse(
-      localStorage.getItem("crack_history") || "[]"
+      localStorage.getItem("crack_history_v2") || "[]"
     );
     setHistory(savedHistory);
   }, []);
 
-  const getSeverity = (width) => {
-    if (width < 0.5) {
-      return { label: "Minor", color: "#10b981" }; // Emerald green
-    }
-    if (width < 1.5) {
-      return { label: "Moderate", color: "#f59e0b" }; // Amber warning
-    }
-    return { label: "Critical", color: "#ef4444" }; // Red danger
-  };
-
   const processUpload = async (file) => {
     if (!file) return;
     setLoading(true);
+    setNoCrackWarning("");
 
     const formData = new FormData();
     formData.append("image", file);
+    formData.append("structure", structure);
 
     try {
-      const res = await axios.post("http://127.0.0.1:5000/upload", formData);
+      const res = await axios.post(`${API_BASE}/analyze`, formData);
       
+      // Handle No Crack Detected Case
+      if (res.data.message && res.data.message === "No crack detected") {
+        setNoCrackWarning(`Structure is Safe: YOLOv8 detected no structural crack anomalies for this ${structure}!`);
+        setLoading(false);
+        return;
+      }
+
       const newResult = {
-        image: res.data.image, // Raw base64 string
+        result_image: res.data.result_image,
+        chart: res.data.chart,
+        heatmap: res.data.heatmap,
+        structure: res.data.structure,
+        total_cracks: res.data.total_cracks,
+        largest_crack: res.data.largest_crack,
+        average_crack_width: res.data.average_crack_width,
+        damage_percentage: res.data.damage_percentage,
+        severity: res.data.severity,
+        risk_score: res.data.risk_score,
+        recommendation: res.data.recommendation,
         prediction: res.data.prediction,
-        chart: res.data.chart, // Raw base64 string
+        severity_counts: res.data.severity_counts,
+        report: res.data.report,
+        pdf_url: res.data.pdf_url,
         timestamp: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         fileName: file.name
       };
@@ -55,21 +83,13 @@ function UploadPage() {
       // Add to session history
       const updatedHistory = [newResult, ...history].slice(0, 5);
       setHistory(updatedHistory);
-      localStorage.setItem("crack_history", JSON.stringify(updatedHistory));
+      localStorage.setItem("crack_history_v2", JSON.stringify(updatedHistory));
 
       // Navigate to detailed result
-      navigate("/result", {
-        state: {
-          image: res.data.image,
-          prediction: res.data.prediction,
-          chart: res.data.chart,
-          filename: file.name,
-          timestamp: newResult.timestamp
-        }
-      });
+      navigate("/result", { state: newResult });
     } catch (error) {
       console.error("Upload failed:", error);
-      alert("Failed to analyze image. Please ensure the backend Flask server is running on http://127.0.0.1:5000");
+      alert(`Failed to analyze image. Please ensure the backend Flask server is running on ${API_BASE}`);
     } finally {
       setLoading(false);
     }
@@ -100,21 +120,14 @@ function UploadPage() {
     }
   };
 
-  // Helper formatting for base64 display
-  const formatBase64 = (str, type = "jpeg") => {
-    if (!str) return "";
-    if (str.startsWith("data:image")) return str;
-    return `data:image/${type};base64,${str}`;
-  };
-
-  // Compute Dashboard Statistics
+  // Compute Dashboard Statistics from history v2
   const totalScans = history.length;
-  const criticalScans = history.filter(
-    (item) => getSeverity(item.prediction).label === "Critical"
+  const highRiskScans = history.filter(
+    (item) => item.severity === "HIGH"
   ).length;
   
   const averageWidth = history.length
-    ? (history.reduce((sum, item) => sum + item.prediction, 0) / history.length).toFixed(2)
+    ? (history.reduce((sum, item) => sum + item.largest_crack, 0) / history.length).toFixed(2)
     : "0.00";
 
   return (
@@ -122,10 +135,7 @@ function UploadPage() {
       {/* NAVBAR */}
       <nav className="navbar">
         <div className="logo">
-          <span>🔍</span> Structural Analytics AI
-        </div>
-        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
-          Dashboard v1.2
+          <span>🔍</span> Crackx
         </div>
       </nav>
 
@@ -143,22 +153,22 @@ function UploadPage() {
           </div>
 
           <div className="glass-card">
-            <h4>Critical Threats</h4>
-            <h2 style={{ fontSize: "2.2rem", margin: "0.5rem 0 0", color: criticalScans > 0 ? "var(--danger)" : "var(--text)" }}>
-              {criticalScans}
+            <h4>Severe Threat Alerts</h4>
+            <h2 style={{ fontSize: "2.2rem", margin: "0.5rem 0 0", color: highRiskScans > 0 ? "var(--danger)" : "var(--text)" }}>
+              {highRiskScans}
             </h2>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-              Widths exceeding threshold (&gt; 1.5mm)
+              Structural inspections classified as HIGH severity
             </div>
           </div>
 
           <div className="glass-card">
-            <h4>Average Width</h4>
+            <h4>Avg Largest Crack</h4>
             <h2 style={{ fontSize: "2.2rem", margin: "0.5rem 0 0", color: "var(--success)" }}>
               {averageWidth} <span style={{ fontSize: "1.1rem", fontWeight: 500 }}>mm</span>
             </h2>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-              Overall structural severity average
+              Session average of peak anomalies
             </div>
           </div>
         </div>
@@ -167,21 +177,50 @@ function UploadPage() {
         <section className="glass-card" style={{ marginBottom: "3rem", padding: "2.5rem" }}>
           <div style={{ textAlign: "center", marginBottom: "2rem" }}>
             <h2 style={{ fontSize: "1.8rem", marginBottom: "0.5rem" }}>
-              AI-Powered Crack Analyzer
+              Crackx Analyzer
             </h2>
-            <p style={{ color: "var(--text-muted)", maxWidth: "550px", margin: "0 auto", fontSize: "0.95rem" }}>
-              Upload high-resolution images of concrete or masonry cracks. Our dual YOLOv8 & LSTM network will instantly detect, analyze, and forecast growth.
+            <p style={{ color: "var(--text-muted)", maxWidth: "550px", margin: "0 auto 1.5rem", fontSize: "0.95rem" }}>
+              Inspect bridges, pillars, building structures, roads, and dams. YOLOv8 detects crack bounds, generates colormapped stress heatmaps, and forecasts growth.
             </p>
+            
+            {/* STRUCTURE SELECTOR */}
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "1rem", marginTop: "1rem" }}>
+              <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-muted)" }}>
+                SELECT STRUCTURE TYPE:
+              </span>
+              <select 
+                className="structure-select"
+                value={structure}
+                onChange={(e) => setStructure(e.target.value)}
+              >
+                <option value="building">🏢 Building</option>
+                <option value="bridge">🌉 Bridge</option>
+                <option value="pillar">🏛️ Pillar / Column</option>
+                <option value="road">🛣️ Road / Asphalt</option>
+                <option value="dam">🌊 Hydroelectric Dam</option>
+              </select>
+            </div>
           </div>
+
+          {/* NO CRACK NOTIFICATION */}
+          {noCrackWarning && (
+            <div className="glass-card" style={{ background: "rgba(16, 185, 129, 0.08)", borderColor: "var(--success)", margin: "0 auto 2rem", maxWidth: "600px", padding: "1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+              <div style={{ fontSize: "1.8rem" }}>🛡️</div>
+              <div style={{ textAlign: "left" }}>
+                <h4 style={{ color: "var(--success)", margin: 0, fontSize: "0.95rem" }}>Inspection Result</h4>
+                <p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", color: "var(--text)" }}>{noCrackWarning}</p>
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
               <div className="loading-spinner"></div>
               <h3 style={{ color: "var(--primary)", marginTop: "1.5rem", marginBottom: "0.5rem" }}>
-                Running AI Inspection...
+                Conducting AI Micro-Inspection...
               </h3>
               <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                Detecting crack coordinates and computing growth trends using LSTM predictive logic.
+                Detecting coordinates, generating color gradient heatmaps, and computing future growth curve.
               </p>
             </div>
           ) : (
@@ -227,19 +266,10 @@ function UploadPage() {
               </h3>
               <div style={{ display: "flex", flexDirection: "column", gap: "1rem", flex: 1, overflowY: "auto", maxHeight: "350px" }}>
                 {history.map((item, index) => {
-                  const severity = getSeverity(item.prediction);
                   return (
                     <div
                       key={index}
-                      onClick={() => navigate("/result", {
-                        state: {
-                          image: item.image,
-                          prediction: item.prediction,
-                          chart: item.chart,
-                          filename: item.fileName,
-                          timestamp: item.timestamp
-                        }
-                      })}
+                      onClick={() => navigate("/result", { state: item })}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -264,7 +294,7 @@ function UploadPage() {
                       }}
                     >
                       <img
-                        src={formatBase64(item.image)}
+                        src={resolveUrl(item.result_image)}
                         alt="crack preview"
                         style={{
                           height: "60px",
@@ -279,15 +309,15 @@ function UploadPage() {
                           {item.fileName}
                         </div>
                         <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                          {item.timestamp}
+                          {item.structure.toUpperCase()} • {item.timestamp}
                         </div>
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: "0.9rem", fontWeight: "700", color: "var(--primary)" }}>
-                          {item.prediction.toFixed(2)} mm
+                          {item.largest_crack.toFixed(2)} mm
                         </div>
-                        <span className={`status-badge ${severity.label.toLowerCase()}`} style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem", marginTop: "0.25rem" }}>
-                          {severity.label}
+                        <span className={`status-badge ${item.severity.toLowerCase()}`} style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem", marginTop: "0.25rem" }}>
+                          {item.severity}
                         </span>
                       </div>
                     </div>
@@ -299,7 +329,7 @@ function UploadPage() {
             {/* TRENDS CHART */}
             <section className="glass-card">
               <h3 style={{ marginBottom: "1.5rem", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "0.75rem" }}>
-                Crack Growth Trend
+                Session Crack Size Trend
               </h3>
               <div className="chart-container-card" style={{ height: "300px" }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -318,7 +348,8 @@ function UploadPage() {
                     />
                     <Line
                       type="monotone"
-                      dataKey="prediction"
+                      dataKey="largest_crack"
+                      name="Max Crack Width"
                       stroke="var(--primary)"
                       strokeWidth={3}
                       dot={{ r: 4, stroke: "var(--bg)", strokeWidth: 1 }}
@@ -328,7 +359,7 @@ function UploadPage() {
                 </ResponsiveContainer>
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.75rem", textAlign: "center" }}>
-                Chronological chart showing predicted crack sizes (in mm)
+                Chronological chart showing peak detected crack sizes (in mm)
               </div>
             </section>
           </div>
@@ -337,7 +368,7 @@ function UploadPage() {
 
       {/* FOOTER */}
       <footer style={{ textAlign: "center", marginTop: "4rem", color: "var(--text-muted)", fontSize: "0.8rem", padding: "1.5rem 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-        <p>© 2026 Structural Analytics AI Platform. All rights reserved.</p>
+        <p>© 2026 Crackx. All rights reserved.</p>
       </footer>
     </div>
   );

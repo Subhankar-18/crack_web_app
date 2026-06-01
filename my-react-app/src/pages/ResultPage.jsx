@@ -1,10 +1,26 @@
-import React from "react";
+import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "";
+
+const resolveUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("http")) {
+    try {
+      const path = new URL(url).pathname;
+      return `${API_BASE}${path}?t=${new Date().getTime()}`;
+    } catch (e) {
+      return url;
+    }
+  }
+  return url;
+};
 
 function ResultPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const data = location.state;
+  const [copied, setCopied] = useState(false);
 
   if (!data) {
     return (
@@ -23,41 +39,24 @@ function ResultPage() {
     );
   }
 
-  const getSeverity = (width) => {
-    if (width < 0.5) {
-      return {
-        label: "Minor",
-        class: "minor",
-        risk: "Low",
-        color: "#10b981",
-        rec: "Minor concrete hairline crack detected. Monitor monthly for changes. No immediate structural hazard is anticipated. Normal maintenance routines apply."
-      };
+  const getSeverityConfig = (sev) => {
+    switch (sev) {
+      case "LOW":
+        return { class: "low", color: "#10b981", bg: "var(--success-bg)", label: "Low Severity" };
+      case "MODERATE":
+        return { class: "moderate", color: "#f59e0b", bg: "var(--warning-bg)", label: "Moderate Severity" };
+      case "HIGH":
+      default:
+        return { class: "high", color: "#ef4444", bg: "var(--danger-bg)", label: "High Severity" };
     }
-    if (width < 1.5) {
-      return {
-        label: "Moderate",
-        class: "moderate",
-        risk: "Medium",
-        color: "#f59e0b",
-        rec: "Moderate structural damage detected. Active crack repair is recommended. The structure is beginning to exhibit fatigue stress. Sealing and reinforcement are advised to prevent liquid ingress."
-      };
-    }
-    return {
-      label: "Critical",
-      class: "critical",
-      risk: "High",
-      color: "#ef4444",
-      rec: "Critical structural fracture detected. Immediate safety hazard! Major structural warning. Please restrict heavy loads immediately and consult a certified structural engineering team for deep remediation."
-    };
   };
 
-  const severity = getSeverity(data.prediction);
+  const severityConfig = getSeverityConfig(data.severity);
 
-  // Helper formatting for base64 display
-  const formatBase64 = (str, type = "jpeg") => {
-    if (!str) return "";
-    if (str.startsWith("data:image")) return str;
-    return `data:image/${type};base64,${str}`;
+  const handleCopyReport = () => {
+    navigator.clipboard.writeText(data.report);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -65,7 +64,7 @@ function ResultPage() {
       {/* NAVBAR */}
       <nav className="navbar">
         <div className="logo" onClick={() => navigate("/")} style={{ cursor: "pointer" }}>
-          <span>🔍</span> Structural Analytics AI
+          <span>🔍</span> Crackx
         </div>
         <button className="secondary" onClick={() => navigate("/")} style={{ padding: "0.5rem 1.2rem", fontSize: "0.85rem" }}>
           ← Back to Dashboard
@@ -74,13 +73,18 @@ function ResultPage() {
 
       <main>
         {/* HEADER SUMMARY */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "1rem", marginBottom: "2rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "1rem", marginBottom: "2.5rem" }}>
           <div>
-            <span style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Inspection Report
-            </span>
-            <h2 style={{ fontSize: "2rem", margin: "0.25rem 0 0" }}>
-              {data.filename || "inspection_scan.jpg"}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Crackx Inspection Report
+              </span>
+              <span className={`status-badge ${data.severity.toLowerCase()}`} style={{ fontSize: "0.65rem", padding: "0.1rem 0.5rem" }}>
+                {data.structure.toUpperCase()}
+              </span>
+            </div>
+            <h2 style={{ fontSize: "2rem", margin: "0.35rem 0 0" }}>
+              {data.fileName || "inspection_scan.jpg"}
             </h2>
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
               Analyzed on {data.timestamp || new Date().toLocaleString()}
@@ -88,117 +92,206 @@ function ResultPage() {
           </div>
           <div className="actions-bar" style={{ display: "flex", gap: "1rem" }}>
             <a 
-              href={formatBase64(data.image)} 
-              download={`crack_detection_${data.filename || "result"}.jpg`}
-              className="btn secondary"
+              href={resolveUrl(data.pdf_url)} 
+              target="_blank" 
+              rel="noreferrer"
+              className="btn"
               style={{ textDecoration: "none" }}
             >
-              📥 Download Detection
+              📥 Download Server PDF
             </a>
-            <button onClick={() => window.print()}>
-              📄 Generate PDF Report
-            </button>
           </div>
         </div>
 
-        {/* METRICS ROW */}
-        <div className="stats-grid" style={{ marginBottom: "2rem" }}>
+        {/* 4-COLUMN STATS PANEL */}
+        <div className="stats-grid" style={{ marginBottom: "2.5rem" }}>
           <div className="glass-card" style={{ borderLeft: `4px solid var(--primary)` }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
-              Predicted Crack Width
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600" }}>
+              Peak Crack Width
             </span>
             <h2 style={{ fontSize: "2rem", color: "var(--primary)", margin: "0.5rem 0 0" }}>
-              {data.prediction.toFixed(3)} <span style={{ fontSize: "1.1rem" }}>mm</span>
+              {data.largest_crack.toFixed(3)} <span style={{ fontSize: "1.1rem" }}>mm</span>
             </h2>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-              Forecasted crack growth width
+              Maximum identified width
             </div>
           </div>
 
-          <div className="glass-card" style={{ borderLeft: `4px solid ${severity.color}` }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
-              Severity Classification
+          <div className="glass-card" style={{ borderLeft: `4px solid #9333ea` }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600" }}>
+              Average Crack Width
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.7rem" }}>
-              <span className={`status-badge ${severity.class}`} style={{ fontSize: "0.9rem" }}>
-                {severity.label}
-              </span>
-            </div>
+            <h2 style={{ fontSize: "2rem", color: "#b566ff", margin: "0.5rem 0 0" }}>
+              {data.average_crack_width.toFixed(3)} <span style={{ fontSize: "1.1rem" }}>mm</span>
+            </h2>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-              Calculated inspection threat status
+              Average anomalous sizing
             </div>
           </div>
 
-          <div className="glass-card">
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
-              Structural Risk & Confidence
+          <div className="glass-card" style={{ borderLeft: `4px solid var(--warning)` }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600" }}>
+              Surface Damage Ratio
             </span>
-            <h2 style={{ fontSize: "1.6rem", margin: "0.5rem 0 0" }}>
-              <span style={{ color: severity.color }}>{severity.risk} Risk</span>
-              <span style={{ color: "var(--text-muted)", fontSize: "1rem", fontWeight: 400 }}> (94% AI conf)</span>
+            <h2 style={{ fontSize: "2rem", color: "var(--warning)", margin: "0.5rem 0 0" }}>
+              {data.damage_percentage.toFixed(3)} <span style={{ fontSize: "1.1rem" }}>%</span>
             </h2>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-              Risk priority and neural confidence
+              Anomalous crack surface area
+            </div>
+          </div>
+
+          <div className="glass-card" style={{ borderLeft: `4px solid ${severityConfig.color}` }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600" }}>
+              Anomalies Detected
+            </span>
+            <h2 style={{ fontSize: "2rem", color: severityConfig.color, margin: "0.5rem 0 0" }}>
+              {data.total_cracks} <span style={{ fontSize: "1.1rem" }}>Cracks</span>
+            </h2>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
+              Counted YOLOv8 cracks
             </div>
           </div>
         </div>
 
-        {/* RESULTS GRID */}
-        <div className="results-grid">
+        {/* RESULTS GRID - DUAL SCAN VISUALIZERS */}
+        <div className="results-grid" style={{ marginBottom: "2.5rem" }}>
           {/* DETECTION VISUALIZER */}
           <div className="glass-card scanner-overlay" style={{ display: "flex", flexDirection: "column" }}>
             <div className="scanner-line"></div>
             <h3 style={{ marginBottom: "1rem", color: "#ffffff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>YOLOv8 Detection Visualizer</span>
+              <span>YOLOv8 Detection Overlay</span>
               <span style={{ fontSize: "0.75rem", color: "var(--primary)", background: "rgba(0, 210, 255, 0.08)", padding: "0.25rem 0.5rem", borderRadius: "6px" }}>
-                Active Overlay
+                Active Bounds
               </span>
             </h3>
             <div className="image-box" style={{ flex: 1, justifyContent: "center" }}>
               <img
-                src={formatBase64(data.image)}
+                src={resolveUrl(data.result_image)}
                 alt="YOLO Crack Bounding Box"
-                style={{ width: "100%", maxHeight: "420px", objectFit: "contain" }}
+                style={{ width: "100%", maxHeight: "380px", objectFit: "contain" }}
               />
             </div>
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-              Annotated bounding box denotes coordinates of largest identified crack fracture.
+              Annotated boxes highlight crack locations and surface anomalies.
             </div>
           </div>
 
-          {/* PREDICTION FORECAST CHART & RECOMMENDATION */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
-            {/* RECOMMENDATION CARD */}
-            <div className="glass-card" style={{ borderLeft: `5px solid ${severity.color}` }}>
-              <h3 style={{ marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <span>📋</span> AI Maintenance Recommendation
-              </h3>
-              <p style={{ margin: 0, color: "var(--text)", fontSize: "0.95rem", lineHeight: "1.6" }}>
-                {severity.rec}
-              </p>
+          {/* STRESS DENSITY HEATMAP */}
+          <div className="glass-card" style={{ display: "flex", flexDirection: "column" }}>
+            <h3 style={{ marginBottom: "1rem", color: "#ffffff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Localized Stress Density Heatmap</span>
+              <span style={{ fontSize: "0.75rem", color: "#b566ff", background: "rgba(181, 102, 255, 0.08)", padding: "0.25rem 0.5rem", borderRadius: "6px" }}>
+                JET Colormap
+              </span>
+            </h3>
+            <div className="image-box" style={{ flex: 1, justifyContent: "center" }}>
+              <img
+                src={resolveUrl(data.heatmap)}
+                alt="Stress Heatmap colormap jet"
+                style={{ width: "100%", maxHeight: "380px", objectFit: "contain" }}
+              />
             </div>
-
-            {/* CHART */}
-            <div className="glass-card">
-              <h3 style={{ marginBottom: "1rem" }}>LSTM Crack Growth Projection</h3>
-              <div className="image-box">
-                <img
-                  src={formatBase64(data.chart, "png")}
-                  alt="LSTM Prediction Chart"
-                  style={{ width: "100%", objectFit: "contain" }}
-                />
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.75rem", textAlign: "center" }}>
-                LSTM modeling predicts crack propagation cycles.
-              </div>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
+              Thermal mapping illustrates structural surface strain density and risk concentration.
             </div>
           </div>
         </div>
+
+        {/* DOUBLE-CARD ANALYTICAL ROW */}
+        <div className="results-grid" style={{ marginBottom: "2.5rem" }}>
+          {/* RISK ASSESSMENT */}
+          <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            <div>
+              <h3 style={{ marginBottom: "0.5rem" }}>AI Structural Risk Assessment</h3>
+              <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: 0 }}>
+                Inspection scoring based on {data.structure} parameters
+              </p>
+            </div>
+
+            {/* Risk bar */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", fontWeight: "600" }}>
+                <span>Risk Index</span>
+                <span style={{ color: severityConfig.color }}>{data.risk_score} / 100 ({severityConfig.label})</span>
+              </div>
+              <div className="progress-bar-container">
+                <div 
+                  className={`progress-bar ${severityConfig.class}`} 
+                  style={{ width: `${data.risk_score}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Severity Pill Counts */}
+            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "10px", padding: "1rem" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600", display: "block", marginBottom: "0.75rem" }}>
+                YOLO Severity Anomalies Breakdown
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+                <span style={{ background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.15)", borderRadius: "20px", padding: "0.25rem 0.75rem", fontSize: "0.8rem", color: "var(--success)", fontWeight: "600" }}>
+                  🟢 Low: {data.severity_counts.low}
+                </span>
+                <span style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.15)", borderRadius: "20px", padding: "0.25rem 0.75rem", fontSize: "0.8rem", color: "var(--warning)", fontWeight: "600" }}>
+                  🟡 Moderate: {data.severity_counts.moderate}
+                </span>
+                <span style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.15)", borderRadius: "20px", padding: "0.25rem 0.75rem", fontSize: "0.8rem", color: "var(--danger)", fontWeight: "600" }}>
+                  🔴 Severe: {data.severity_counts.severe}
+                </span>
+              </div>
+            </div>
+
+            {/* AI Recommendation */}
+            <div style={{ borderLeft: `4px solid ${severityConfig.color}`, background: severityConfig.bg, padding: "1rem", borderRadius: "0 8px 8px 0" }}>
+              <span style={{ fontSize: "0.75rem", color: severityConfig.color, fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: "0.25rem" }}>
+                Recommendation
+              </span>
+              <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text)", lineHeight: "1.5" }}>
+                {data.recommendation}
+              </p>
+            </div>
+          </div>
+
+          {/* LSTM GROWTH CHART */}
+          <div className="glass-card" style={{ display: "flex", flexDirection: "column" }}>
+            <h3 style={{ marginBottom: "0.5rem" }}>LSTM Crack Growth Prediction</h3>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "1rem" }}>
+              Forecasted crack propagation cycles mapping peak anomaly values
+            </p>
+            <div className="image-box" style={{ flex: 1, justifyContent: "center" }}>
+              <img
+                src={resolveUrl(data.chart)}
+                alt="LSTM Prediction chart"
+                style={{ width: "100%", maxHeight: "300px", objectFit: "contain" }}
+              />
+            </div>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.75rem", textAlign: "center" }}>
+              LSTM modeling projects critical crack width expanding to {data.prediction.toFixed(2)} mm.
+            </div>
+          </div>
+        </div>
+
+        {/* TERMINAL TEXT REPORT CARD */}
+        <section className="glass-card" style={{ marginBottom: "2rem", padding: 0, overflow: "hidden" }}>
+          <div className="report-block-header">
+            <span>💻 CRACK_ANALYSIS_AI_REPORT_SHELL</span>
+            <button 
+              className="secondary" 
+              onClick={handleCopyReport}
+              style={{ padding: "0.25rem 0.75rem", fontSize: "0.75rem", borderRadius: "6px", minWidth: "100px" }}
+            >
+              {copied ? "copied! ✓" : "Copy Report"}
+            </button>
+          </div>
+          <div className="report-block">
+            {data.report}
+          </div>
+        </section>
       </main>
 
       {/* FOOTER */}
       <footer className="no-print" style={{ textAlign: "center", marginTop: "4rem", color: "var(--text-muted)", fontSize: "0.8rem", padding: "1.5rem 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-        <p>© 2026 Structural Analytics AI Platform. All rights reserved.</p>
+        <p>© 2026 Crackx. All rights reserved.</p>
       </footer>
     </div>
   );
